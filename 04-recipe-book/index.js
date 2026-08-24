@@ -3,6 +3,20 @@ require('dotenv').config();
 const cors = require('cors'); // cors = cross origin resources sharing
 const { connect } = require('./db')
 const { ObjectId } = require('mongodb');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken')
+
+function generateAccessToken(id) {
+    // first parameter of jwt.sign: the payload/claims
+    // second parameter is the token secret
+    // third parameter is the config
+    return jwt.sign({
+        user_id: id,
+        role: "member"
+    }, process.env.TOKEN_SECRET, {
+        expiresIn: '3w'
+    })
+}
 
 // 1. create express application
 const app = express();
@@ -277,6 +291,103 @@ async function main() {
 
 
 
+    })
+
+    /**
+     * req.body.email: email address of the user
+     * req.body.password: password of the user
+     */
+    app.post('/users', async function (req, res) {
+        const password = await bcrypt.hash(req.body.password, 12);
+        const email = req.body.email;
+        // TODO: reject if the email is already in use
+
+        const result = await db.collection('users').insertOne({
+            email, password
+        });
+        res.status(201).json({
+            'message': 'New user has been created',
+            result
+        })
+
+    })
+
+    // req.body.email = email of the user logging in
+    // req.body.password = password of the user logging in
+    app.post('/login', async function (req, res) {
+        // const req.body.email = req.body.email;
+        // const req.body.password = req.body.password;
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({
+                message: "Email and password are required"
+            })
+        }
+
+        // find the user by the given email address
+        const user = await db.collection("users").findOne({
+            email
+        });
+        if (user) {
+            // check if the password
+            // first parameter of compare must be the plaintext
+            // second parameter is the hashed version
+            const isPasswordValid = await bcrypt.compare(password, user.password);
+            if (!isPasswordValid) {
+                return res.status(401).json({
+                    error: "Invalid credentials"
+                })
+            }
+            // TODO: create a JWT and send back to the client
+            const accessToken = generateAccessToken(user._id);
+            res.json({
+                accessToken
+            })
+
+        } else {
+            // if email is not found
+            return res.status(401).json({
+                error: "Invalid credentials"
+            })
+        }
+
+    })
+
+    // req and res - same as the one for the route function
+    // next will be a function that calls the next middleware, or if there's no middleware
+    // left to be call, call the function
+    function verifyToken(req, res, next) {
+        const authorization = req.headers.authorization;
+        const accessToken = authorization.split(" ")[1];
+        if (!accessToken) {
+            return res.sendStatus(401);
+        }
+
+        // use jwt.verify to test if the signature matches the hash of the payload + config
+        jwt.verify(accessToken, process.env.TOKEN_SECRET, function (err, payload) {
+            if (err) {
+                return res.sendStatus(403)
+            }
+
+            // you can add to the request in a middleware
+            // once the payload is added to req, the route can access it as the `user` key
+            req.user = payload;
+            next(); // this middleware is successfully (i.e no problem), call the next middleware
+        });
+    }
+
+    app.get('/profile',[verifyToken], async function (req, res) {
+        const user = req.user;
+        res.json({
+            "message":"private profile is accessed",
+            user
+        })
+    })
+
+    app.post('/checkout', [verifyToken], async function(req,res){
+        res.json({
+            'message':'Mock shopping cart checkout'
+        })
     })
 
 }
