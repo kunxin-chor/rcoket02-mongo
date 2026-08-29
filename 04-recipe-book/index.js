@@ -4,7 +4,8 @@ const cors = require('cors'); // cors = cross origin resources sharing
 const { connect } = require('./db')
 const { ObjectId } = require('mongodb');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken')
+const jwt = require('jsonwebtoken');
+const { generateSearchParameters } = require('./ai');
 
 function generateAccessToken(id) {
     // first parameter of jwt.sign: the payload/claims
@@ -92,6 +93,54 @@ async function main() {
         res.json({
             "recipes": recipes
         })
+    })
+
+    app.get('/ai/recipes', async function (req, res) {
+        try {
+            const query = req.query.query;
+            const allCuisines = await db.collection('cuisines').distinct('name');
+            const allTags = await db.collection('tags').distinct('name');
+            const allIngredients = await db.collection('recipes').distinct('ingredients.name');
+
+            const searchParams = await generateSearchParameters(query, allTags, allCuisines, allIngredients);
+
+            // we will use the searchParameters to perform a search
+            const criteria = {};
+
+            if (searchParams.cuisines && searchParams.cuisines.length > 0) {
+                criteria["cuisine.name"] = {
+                    $in: searchParams.cuisines
+                }
+            }
+
+            if (searchParams.ingredients && searchParams.ingredients.length > 0) {
+                criteria["ingredients.name"] = {
+                    $all: searchParams.ingredients
+                }
+            }
+
+            if (searchParams.tags && searchParams.tags.length > 0) {
+                criteria['tags.name'] = {
+                    $in: searchParams.tags
+                }
+            }
+
+            const recipes = await db.collection('recipes')
+                    .find(criteria)
+                    .toArray();
+
+            res.json({
+                recipes
+            })
+
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({
+                'error': 'Unable to search with AI'
+            })
+        }
+
+
     })
 
     // req.body should contain: name, cuisine, prepTime, cookTime, servings, ingredients, instructions, tags
@@ -376,17 +425,17 @@ async function main() {
         });
     }
 
-    app.get('/profile',[verifyToken], async function (req, res) {
+    app.get('/profile', [verifyToken], async function (req, res) {
         const user = req.user;
         res.json({
-            "message":"private profile is accessed",
+            "message": "private profile is accessed",
             user
         })
     })
 
-    app.post('/checkout', [verifyToken], async function(req,res){
+    app.post('/checkout', [verifyToken], async function (req, res) {
         res.json({
-            'message':'Mock shopping cart checkout'
+            'message': 'Mock shopping cart checkout'
         })
     })
 
